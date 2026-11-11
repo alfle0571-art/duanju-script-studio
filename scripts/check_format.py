@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""中文短剧剧本格式校验器。
+
+用法:
+    python check_format.py <剧本文件路径> [更多路径...]
+
+检查项: 场序格式与连续性、每集场景数 <= 5、动作行、对话行、
+        内心os 写法、闪回成对、首次出场字幕覆盖、文风禁用词。
+
+退出码: 0 = 无 ERROR（可交付）；1 = 存在 ERROR；2 = 入参或文件错误。
+仅做结构校验，不判断文笔；文笔与情绪按 SKILL.md 自检清单人工复核。
+"""
+
+import re
+import sys
+from pathlib import Path
+
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+SCENE_HEAD = re.compile(r"^场(\d+)-(\d+)\s+(.*)$")
+DIALOG = re.compile(r"^([^△\s【】（）()：:]+?)(?:[（(][^）)]*[）)])?[：:]\s*(.*)$")
+OS_LINE = re.compile(r"^(.+?)内心\s*os\s*[：:]\s*(.*)$", re.IGNORECASE)
+CAPTION = re.compile(r"【字幕[：:]\s*([^，,、】]+)[，,]?([^】]*)】")
+FLASH_START = "【闪回】"
+FLASH_END = "【闪回结束】"
+
+# B 区博主腔 / C 区学术腔 / 互联网黑话（对应 SKILL.md 硬规则 3）
+BANNED = [
+    "哈哈", "emmm", "说实话", "以我的经验", "个人觉得", "我之前试过",
+    "欢迎在评论区", "有没有遇到过这种情况", "说到这个", "对了，还有",
+    "星巴克", "赋能", "闭环", "全链路", "多维度", "底座", "体系化",
+    "发挥了关键作用", "提供了坚实基础", "全方位强化", "综上所述", "由此可见",
+]
+# 动作行里不该出现的抽象情绪判断（对应硬规则 4）
+ABSTRACT = [
+    "很悲伤", "很愤怒", "气氛压抑", "气氛凝固", "内心悲痛", "心情复杂",
+    "情绪崩溃", "感到绝望", "十分震惊", "非常难过", "特别生气",
+]
+# 括号里只写抽象情绪标签，没给可演的动作
+VAGUE_CUE = re.compile(r"[（(](悲伤|愤怒|开心|难过|生气|震惊|害怕|激动|痛苦|绝望)[）)]")
+
+SKIP_PREFIX = ("△", "【", "（", "(", "#", ">", "|", "-", "---", "第", "*", ">")
+
+
+def check(path):
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except Exception as exc:
+        return None, [("ERROR", 0, "无法读取文件：{}".format(exc))]
+
+    issues = []
+    lines = text.splitlines()
+    scenes = []                 # (行号, 集号, 场号, 整行)
+    speakers = set()            # 有台词的角色
+    captions = set()            # 挂过字幕的角色
+    flash_depth = 0
+    scene_count_by_ep = {}
+    has_action = False
+    has_dialog = False
+
+    for idx, raw in enumerate(lines, 1):
+        line = raw.strip()
+        if not line:
+            continue
+
+        # 字幕：可在任意行尾，先全局收集
+        for m in CAPTION.finditer(line):
+            captions.add(m.group(1).strip())
+
+        # 闪回配对
+        if FLASH_START in line:
+            flash_depth += 1
+        if FLASH_END in line:
+            flash_depth -= 1
+            if flash_depth < 0:
+                issues.append(("ERROR", idx, "【闪回结束】多于【闪回】，没有对应的开始标记"))
+                flash_depth = 0
+
+        # 场序
+        m = SCENE_HEAD.match(line)
+        if m:
+            ep, no, rest = int(m.group(1)), int(m.group(2)), m.group(3)
+            scenes.append((idx, ep, no, line))
+            scene_count_by_ep[ep] = scene_count_by_ep.get(ep, 0) + 1
+            if "/" not in rest:
+                issues.append(("ERROR", idx, "场序缺「天气/场景」，应写作 日/内、日/外、夜/内 等"))
+            if "主要人物" not in rest:
+                issues.append(("ERROR", idx, "场序缺「主要人物：」字段"))
+            continue
+
+        # 疑似场序但写错前缀
+        if re.match(r"^\d+-\d+\s", line):
+            issues.append(("ERROR", idx, "场序缺少「场」前缀，应写作 场x-y …"))
+            continue
+
+        # 动作行
+        if line.startswith("△"):
+            has_action = True
+            for word in ABSTRACT:
+                if word in line:
+                    issues.append(("WARN", idx, "动作行含抽象情绪词「{}」，换成可见微表情（06-emotion-library.md）".format(word)))
+            if len(line) < 4:
+                issues.append(("WARN", idx, "动作行内容过短，可能不是可拍摄的动作"))
+            continue
+
+        # 内心 OS
+        m = OS_LINE.match(line)
+        if m:
+            if not m.group(2).strip():
+                issues.append(("WARN", idx, "内心os 为空"))
+            if len(m.group(2)) > 80:
+                issues.append(("WARN", idx, "内心os 过长（>80字），压成短句，其余交给动作与台词"))
+            continue
+
+        # 闪回标记行、提示行、表格行等跳过
+        if line.startswith(SKIP_PREFIX) or line.startswith("场") or line.startswith("|"):
+            continue
+
+        # 对话行
+        m = DIALOG.match(line)
+        if m:
+            name, speech = m.group(1).strip(), m.group(2).strip()
+            if name and len(name) <= 12 and not name.startswith("填写"):
+                has_dialog = True
+                speakers.add(name)
+                if not speech:
+                    issues.append(("WARN", idx, "「{}」这句台词为空".format(name)))
+                if line.find("：") == -1:
+                    issues.append(("WARN", idx, "对话用了半角冒号，规范用全角「：」"))
+                vm = VAGUE_CUE.search(line)
+                if vm:
+                    issues.append(("WARN", idx, "括号里只写了「{}」，换成具体动作或语气".format(vm.group(1))))
+
+        # 文风禁用词（台词、动作行、OS 一律检查）
+        for word in BANNED:
+            if word in line:
+                issues.append(("ERROR", idx, "出现禁用词「{}」：博主腔 / 学术腔 / 黑话不得进入剧本（SKILL.md 硬规则 3）".format(word)))
+
+    if flash_depth > 0:
+        issues.append(("ERROR", len(lines), "有 {} 处【闪回】未用【闪回结束】闭合".format(flash_depth)))
+
+    if not scenes:
+        issues.append(("ERROR", 0, "未找到任何场序行（场x-x 天气/场景 地点 主要人物：…）"))
+    else:
+        # 按集检查场号从 1 连续递增
+        by_ep = {}
+        for ln, ep, no, _ in scenes:
+            by_ep.setdefault(ep, []).append((no, ln))
+        for ep in sorted(by_ep):
+            seq = by_ep[ep]
+            expected = 1
+            for no, ln in seq:
+                if no != expected:
+                    issues.append(("ERROR", ln, "第{}集场序断号或重复：期望 场{}-{}，实际 场{}-{}".format(ep, ep, expected, ep, no)))
+                    expected = no
+                expected += 1
+        for ep, count in sorted(scene_count_by_ep.items()):
+            if count > 5:
+                issues.append(("ERROR", 0, "第{}集有 {} 个场景，超过每集上限 5 个".format(ep, count)))
+
+    if not has_action:
+        issues.append(("WARN", 0, "全篇没有 △ 动作行"))
+    if not has_dialog:
+        issues.append(("WARN", 0, "全篇没有识别到对话行"))
+
+    missing = sorted(speakers - captions)
+    if missing:
+        issues.append(("ERROR", 0, "以下有台词的角色未挂【字幕】：{}".format("、".join(missing))))
+
+    return {
+        "scenes": len(scenes),
+        "by_ep": scene_count_by_ep,
+        "speakers": len(speakers),
+        "captions": len(captions),
+    }, issues
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(__doc__)
+        return 2
+
+    total_err = total_warn = 0
+    failed = False
+    for arg in sys.argv[1:]:
+        path = Path(arg)
+        if not path.is_file():
+            print("文件不存在：{}".format(arg))
+            failed = True
+            continue
+        stat, issues = check(path)
+        print("\n=== 短剧剧本格式校验：{} ===".format(path.name))
+        errs = [i for i in issues if i[0] == "ERROR"]
+        warns = [i for i in issues if i[0] == "WARN"]
+        for level, ln, msg in errs:
+            print("  ERROR  L{:<4} {}".format(ln, msg))
+        for level, ln, msg in warns:
+            print("  WARN   L{:<4} {}".format(ln, msg))
+        if not issues:
+            print("  未发现问题。")
+        if stat:
+            detail = " / ".join("第{}集 {} 场".format(ep, n) for ep, n in sorted(stat["by_ep"].items()))
+            print("  --- 汇总 ---")
+            print("  场景：{}（共 {} 场）".format(detail or "无", stat["scenes"]))
+            print("  有台词角色 {} 个，字幕覆盖 {} 个".format(stat["speakers"], stat["captions"]))
+        print("  ERROR {} 项 / WARN {} 项 → {}".format(len(errs), len(warns), "未通过，需修复 ERROR" if errs else "通过，可交付"))
+        total_err += len(errs)
+        total_warn += len(warns)
+        if errs:
+            failed = True
+
+    print("\n合计：ERROR {} 项 / WARN {} 项".format(total_err, total_warn))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
