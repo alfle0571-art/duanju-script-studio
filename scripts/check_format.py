@@ -5,8 +5,9 @@
 用法:
     python check_format.py <剧本文件路径> [更多路径...]
 
-检查项: 场序格式与连续性、每集场景数 <= 5、动作行、对话行、说话状态位置、
-        内心os 写法、闪回成对、首次出场字幕覆盖（群演可声明豁免）、文风禁用词。
+检查项: 场序格式与连续性、每集场景数 <= 5、动作行、对话行、说话状态位置（含半角括号）、
+        内心os 写法（含（OS）/ OS 误写）、闪回成对、首次出场字幕覆盖与重复挂字幕
+        （群演可声明豁免）、文风禁用词。
 
 退出码: 0 = 无 ERROR（可交付）；1 = 存在 ERROR；2 = 入参或文件错误。
 仅做结构校验，不判断文笔；文笔与情绪按 SKILL.md 自检清单人工复核。
@@ -32,6 +33,9 @@ SCENE_HEAD = re.compile(r"^场(\d+)-(\d+)\s+(.*)$")
 DIALOG = re.compile(r"^([^△\s【】（）()：:]+?)(?:[（(][^）)]*[）)])?[：:]\s*(.*)$")
 OS_LINE = re.compile(r"^(.+?)内心\s*os\s*[：:]\s*(.*)$", re.IGNORECASE)
 CAPTION = re.compile(r"【字幕[：:]\s*([^，,、】]+)[，,]?([^】]*)】")
+# 内心活动的两种常见误写，都必须单独识别，否则一行静默失检、一行被当成台词配音
+OS_ALT_PAREN = re.compile(r"^([^△\s【】：:]+?)\s*[（(]\s*(?:OS|os|内心)\s*[）)]\s*[：:]")
+OS_ALT_SPACE = re.compile(r"^([^△\s【】：:]+?)\s+(?:OS|os)\s*[：:]")
 # 群演 / 功能性角色豁免：文件里写一行「（本集群演：司仪、宾客甲、路人甲）」即可不挂字幕
 EXTRA = re.compile(r"[（(]?\s*(?:本集)?群演\s*[：:]\s*([^）)】\n]+)")
 FLASH_START = "【闪回】"
@@ -72,6 +76,7 @@ def check(path):
     scenes = []                 # (行号, 集号, 场号, 整行)
     speakers = set()            # 有台词的角色
     captions = set()            # 挂过字幕的角色
+    caption_line = {}           # 角色 -> 首次挂字幕的行号（查重复挂）
     extras = set()              # 声明为群演、不需要字幕的角色
     flash_depth = 0
     scene_count_by_ep = {}
@@ -92,6 +97,12 @@ def check(path):
         # 字幕：可在任意行尾，先全局收集
         for m in CAPTION.finditer(line):
             cap = m.group(1).strip()
+            if cap in caption_line:
+                # 同一角色重复挂字幕，交付件里会出现两次同名字幕，下游字幕轨也会重复
+                issues.append(("WARN", idx, "「{}」重复挂【字幕】（首次在 L{}），全篇只挂一次".format(
+                    cap, caption_line[cap])))
+            else:
+                caption_line[cap] = idx
             captions.add(cap)
             # 年代 / 地点被写成人物字幕，会被当成一个叫「1987 年」的角色（04 第 4 条）
             if re.search(r"\d{2,4}\s*年|年代|世纪", cap):
@@ -145,6 +156,14 @@ def check(path):
                 issues.append(("WARN", idx, "动作行内容过短，可能不是可拍摄的动作"))
             continue
 
+        # 内心活动的误写：写（OS）会被 DIALOG 当成台词（下游直接配音），
+        # 写成「司念 OS：」则整行不匹配任何规则、静默失检（旧版漏洞）
+        m = OS_ALT_PAREN.match(line) or OS_ALT_SPACE.match(line)
+        if m:
+            issues.append(("WARN", idx, "「{}」的内心活动写成了（OS）/ OS，应用「{}内心os：」——写成说话状态会被下游当台词配音".format(
+                m.group(1), m.group(1))))
+            continue
+
         # 内心 OS
         m = OS_LINE.match(line)
         if m:
@@ -169,6 +188,8 @@ def check(path):
                     issues.append(("WARN", idx, "「{}」这句台词为空".format(name)))
                 if line.find("：") == -1:
                     issues.append(("WARN", idx, "对话用了半角冒号，规范用全角「：」"))
+                if re.match(r"^[^（(]+\([^）)]*\)\s*[：:]", line):
+                    issues.append(("WARN", idx, "说话状态用了半角括号，中文剧本统一全角：{}（动作）：台词".format(name)))
                 vm = VAGUE_CUE.search(line)
                 if vm:
                     issues.append(("WARN", idx, "括号里只写了「{}」，换成具体动作或语气".format(vm.group(1))))

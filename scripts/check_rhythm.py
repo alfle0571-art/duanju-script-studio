@@ -8,7 +8,8 @@
 输入格式（每行一个锚点）:
     00:06 | 巴掌 | 女主一句话把婆婆噎在原地
 
-检查: 锚点齐全度、空档长度、呼吸段、类型单调、字面暴力、未填占位符、未知类型。
+检查: 锚点齐全度、空档长度、呼吸段周期、类型单调、字面暴力、未填占位符、未知类型、
+      时间轴乱序、重复锚点、单集时长上限。
 退出码: 0 = 可交付（可带 WARN）；1 = 存在 ERROR（缺必需锚点、反转后缺呼吸段或无法解析）。
 
 口径: 张力轴（冲突 / 爆点 / 巴掌位）按全局空档衡量；喜剧轴按周期；反转按 30 秒周期、
@@ -141,6 +142,30 @@ def main():
     kinds = [k for _, k, _, _ in anchors]
     duration = max(s for s, _, _, _ in anchors)
 
+    # 0. 文件序 vs 时间序：锚点会按时间排好再算，但报告里的 L 行号会跟时间顺序错位，
+    #    用户按行号找会找不到。这类「文件没按时间写」必须单独提示。
+    order = [ln for _, _, _, ln in anchors]
+    inversions = [(a, b) for a, b in zip(order, order[1:]) if b < a]
+    if inversions:
+        warns.append("时间轴未按时间顺序书写（L{} 之后又回到 L{}），已按时间重排计算；"
+                     "建议文件本身就按时间升序，报告里的行号才对得上".format(*inversions[0]))
+
+    # 0b. 完全重复的锚点：复制粘贴残留会让密度虚高、并把「连续 3 个同类」误判出来
+    seen = {}
+    for sec, k, _, ln in anchors:
+        seen.setdefault((sec, k), []).append(ln)
+    dups = [((sec, k), lns) for (sec, k), lns in seen.items() if len(lns) > 1]
+    for (sec, k), lns in sorted(dups)[:3]:
+        warns.append("L{} 是同一秒同一类型的重复锚点（{:02d}:{:02d} {}），删掉多余行".format(
+            "、".join(str(x) for x in lns[1:]), sec // 60, sec % 60, LABELS[k]))
+    if len(dups) > 3:
+        warns.append("另有 {} 组重复锚点未逐条列出".format(len(dups) - 3))
+
+    # 0c. 单集时长上限 120 秒（60 / 90 / 120 三档，02 要求显式声明）
+    if duration > 120:
+        warns.append("时间轴末锚点在 {:02d}:{:02d}，超过单集上限 120 秒；"
+                     "若这是多集合排，请拆成一集一份时间轴".format(duration // 60, duration % 60))
+
     # 1. 必需锚点
     for k in cfg["required"]:
         if k not in kinds:
@@ -203,7 +228,16 @@ def main():
     breaths = [(s, k, ln) for s, k, _, ln in anchors if k == "breath"]
     print("  呼吸段 {} 个".format(len(breaths)))
     if not breaths and duration >= 60:
-        warns.append("全篇没有呼吸段，每 25–35 秒应给 5–8 秒低密度段，反转之后必给")
+        warns.append("全篇没有呼吸段，每 35 秒内至少给一次 5–8 秒低密度段，反转之后必给")
+    elif breaths:
+        # 呼吸段周期（09 定的硬口径是「每 35 秒内至少一次」）。这里只给 WARN 不给
+        # ERROR：片尾与反转留白需要人工判断，且「零呼吸段」已在上面单列。
+        span = [(0, breaths[0][0])] + [(a[0], b[0]) for a, b in zip(breaths, breaths[1:])] + [(breaths[-1][0], duration)]
+        gap, at = max(((b - a, a) for a, b in span), key=lambda x: x[0])
+        print("  呼吸段最长空档 {}s（自 {:02d}:{:02d} 起，上限 35s）".format(gap, at // 60, at % 60))
+        if gap > 35:
+            warns.append("呼吸段最长空档 {}s（自 {:02d}:{:02d} 起）超过 35s，中间补一段 5–8 秒低密度戏".format(
+                gap, at // 60, at % 60))
     twists = [s for s, k, _, _ in anchors if k == "twist"]
     for t in twists:
         # 反转本身就是结尾钩子时，身后没有时长可排，豁免
