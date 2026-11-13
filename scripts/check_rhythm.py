@@ -28,7 +28,11 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-LINE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*\|\s*([^|]+?)\s*\|\s*(.+?)\s*$")
+# 竖线同时吃半角 | 与全角 ｜：中文输入法默认产出全角，旧版只认半角，
+# 整份时间轴会「一个锚点都解析不到」。时间冒号同理
+LINE = re.compile(r"^\s*(\d{1,2})[:：](\d{2})\s*[|｜]\s*([^|｜]+?)\s*[|｜]\s*(.+?)\s*$")
+# 只写了一列分隔的「分:秒｜内容」：细纲动作节点的写法，不是三列时间轴
+NEAR = re.compile(r"^\s*\d{1,2}[:：]\d{2}\s*[|｜]\s*\S")
 
 ALIASES = {
     "钩子": "hook", "开场钩子": "hook", "反常理钩子": "hook",
@@ -88,10 +92,13 @@ VIOLENCE = [
 
 
 def parse(path):
-    anchors, unknown = [], []
-    for idx, raw in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+    anchors, unknown, near = [], [], []
+    text = Path(path).read_text(encoding="utf-8-sig")   # 吃掉 Windows 记事本的 BOM
+    for idx, raw in enumerate(text.splitlines(), 1):
         m = LINE.match(raw)
         if not m:
+            if NEAR.match(raw):
+                near.append(idx)
             continue
         sec = int(m.group(1)) * 60 + int(m.group(2))
         kind = ALIASES.get(m.group(3).strip())
@@ -100,7 +107,7 @@ def parse(path):
             continue
         anchors.append((sec, kind, m.group(4).strip(), idx))
     anchors.sort(key=lambda x: (x[0], x[3]))
-    return anchors, unknown
+    return anchors, unknown, near
 
 
 def main():
@@ -114,12 +121,18 @@ def main():
     if not path.is_file():
         print("文件不存在：{}".format(args.file))
         return 1
-    anchors, unknown = parse(path)
+    anchors, unknown, near = parse(path)
     print("\n=== 节奏时间轴检查：{} （档位 {}）===".format(path.name, args.mode))
     if args.mode in MODE_NOTE:
         print("  " + MODE_NOTE[args.mode])
     if not anchors:
-        print("  ERROR  未解析到任何锚点，检查每行是否为「分:秒 | 类型 | 落点」")
+        if near:
+            print("  ERROR  读到 {} 行「分:秒｜内容」式写法（首个在 L{}），缺类型列，不是三列时间轴".format(
+                len(near), near[0]))
+            print("         每行必须是「分:秒 | 类型 | 落点」；细纲里的动作节点另附一份时间轴，")
+            print("         格式见 assets/节奏时间轴模板.md（类型可选值与同义词也在那里）")
+        else:
+            print("  ERROR  未解析到任何锚点，检查每行是否为「分:秒 | 类型 | 落点」")
         return 1
 
     errs, warns = [], []

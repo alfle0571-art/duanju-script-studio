@@ -10,6 +10,12 @@
 
 退出码: 0 = 无 ERROR（可交付）；1 = 存在 ERROR；2 = 入参或文件错误。
 仅做结构校验，不判断文笔；文笔与情绪按 SKILL.md 自检清单人工复核。
+
+口径说明: 字幕按「全篇首次出场」计，群演声明按「全篇生效」——同一个群演角色
+          不会因为换集又变回需要挂字幕。若某角色中途升格为主要人物（开始有姓名
+          与独立戏份），给他补一条【字幕：姓名，身份】即可，无需删旧声明。
+
+编码: 按 utf-8-sig 读，Windows 记事本另存的 UTF-8（带 BOM）也能正常解析。
 """
 
 import re
@@ -55,7 +61,9 @@ NON_SPEAKER = {"字幕", "人物", "主要人物", "时间", "地点", "备注",
 
 def check(path):
     try:
-        text = Path(path).read_text(encoding="utf-8")
+        # utf-8-sig：Windows 记事本另存的 UTF-8 带 BOM，
+        # 用 utf-8 读会让首行粘上 \ufeff，整场静默失检（旧版漏洞）
+        text = Path(path).read_text(encoding="utf-8-sig")
     except Exception as exc:
         return None, [("ERROR", 0, "无法读取文件：{}".format(exc))]
 
