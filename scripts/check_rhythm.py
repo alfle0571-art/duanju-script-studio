@@ -8,8 +8,11 @@
 输入格式（每行一个锚点）:
     00:06 | 巴掌 | 女主一句话把婆婆噎在原地
 
-检查: 锚点齐全度、任意空档长度、呼吸段、类型单调、字面暴力、未填占位符。
+检查: 锚点齐全度、空档长度、呼吸段、类型单调、字面暴力、未填占位符、未知类型。
 退出码: 0 = 可交付（可带 WARN）；1 = 存在 ERROR（缺必需锚点、反转后缺呼吸段或无法解析）。
+
+口径: 张力轴（冲突 / 爆点 / 巴掌位）按全局空档衡量；喜剧轴按周期；反转按 30 秒周期、
+      容差 45 秒，且把「最后一个反转到片尾」计入，防止只在开头排一个反转。
 
 这是辅助检查，不替代 `09-rhythm-grid.md` 里的创作判断。
 """
@@ -85,7 +88,7 @@ VIOLENCE = [
 
 
 def parse(path):
-    anchors = []
+    anchors, unknown = [], []
     for idx, raw in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
         m = LINE.match(raw)
         if not m:
@@ -93,11 +96,11 @@ def parse(path):
         sec = int(m.group(1)) * 60 + int(m.group(2))
         kind = ALIASES.get(m.group(3).strip())
         if kind is None:
-            print("  WARN   L{:<4} 未知类型「{}」，已忽略（可用类型见时间轴模板）".format(idx, m.group(3).strip()))
+            unknown.append((idx, m.group(3).strip()))
             continue
         anchors.append((sec, kind, m.group(4).strip(), idx))
     anchors.sort(key=lambda x: (x[0], x[3]))
-    return anchors
+    return anchors, unknown
 
 
 def main():
@@ -111,7 +114,7 @@ def main():
     if not path.is_file():
         print("文件不存在：{}".format(args.file))
         return 1
-    anchors = parse(path)
+    anchors, unknown = parse(path)
     print("\n=== 节奏时间轴检查：{} （档位 {}）===".format(path.name, args.mode))
     if args.mode in MODE_NOTE:
         print("  " + MODE_NOTE[args.mode])
@@ -120,6 +123,8 @@ def main():
         return 1
 
     errs, warns = [], []
+    for ln, kind in unknown:
+        warns.append("L{} 未知类型「{}」已忽略，可用类型见 assets/节奏时间轴模板.md".format(ln, kind))
     kinds = [k for _, k, _, _ in anchors]
     duration = max(s for s, _, _, _ in anchors)
 
@@ -139,20 +144,28 @@ def main():
         if not pts:
             warns.append("「{}」一次都没出现，按题材确认是否有意关闭".format(LABELS[k]))
             continue
-        limit = cfg.get("extra", {}).get(k, PERIOD[k] * 2 * cfg["factor"])
-        # 不含「末尾到片尾」：结尾钩子本就不必再排该类型，计入会产生假超期
-        gaps = [pts[0]] + [b - a for a, b in zip(pts, pts[1:])]
+        # 反转是离散点，周期 30 秒，容差 1.5 倍 → 45 秒；且必须算到片尾，
+        # 否则「只在开头排一个反转、后面全靠对话」的稿子会漏检。
+        # 张力轴（冲突 / 爆点 / 巴掌位）与喜剧轴不把片尾计入：结尾钩子本就不必再排该类型。
+        if k == "twist":
+            limit = PERIOD["twist"] * 1.5 * cfg["factor"]
+            gaps = [pts[0]] + [b - a for a, b in zip(pts, pts[1:])] + [duration - pts[-1]]
+            span = "最长空档（含片尾）"
+        else:
+            limit = cfg.get("extra", {}).get(k, PERIOD[k] * 2 * cfg["factor"])
+            gaps = [pts[0]] + [b - a for a, b in zip(pts, pts[1:])]
+            span = "最长间隔"
         longest = max(gaps) if gaps else 0
         if k in continuous:
             print("  OK   {:<6} 出现 {} 次，首次 {:02d}:{:02d}（连续流，按全局空档衡量）".format(
                 LABELS[k], len(pts), pts[0] // 60, pts[0] % 60))
         else:
             flag = "OK " if longest <= limit else "超期"
-            print("  {}  {:<6} 出现 {} 次，首次 {:02d}:{:02d}，最长间隔 {}s（上限 {}s）".format(
-                flag, LABELS[k], len(pts), pts[0] // 60, pts[0] % 60, longest, int(limit)))
+            print("  {}  {:<6} 出现 {} 次，首次 {:02d}:{:02d}，{} {}s（上限 {}s）".format(
+                flag, LABELS[k], len(pts), pts[0] // 60, pts[0] % 60, span, longest, int(limit)))
             if longest > limit:
-                warns.append("「{}」相邻间隔最长 {}s 超过 {}s，补一个该类型锚点".format(
-                    LABELS[k], longest, int(limit)))
+                warns.append("「{}」{} {}s 超过 {}s，补一个该类型锚点".format(
+                    LABELS[k], span, longest, int(limit)))
         # 首现上限与间隔上限用同一把尺，否则会出现「间隔 33s 合格、首现 12s 就报错」的自相矛盾
         first_limit = cfg.get("extra", {}).get(k, PERIOD[k] * cfg["factor"])
         if pts[0] > first_limit:
@@ -167,7 +180,8 @@ def main():
     prev_sec, prev_kind = 0, None
     for sec, kind, _, ln in anchors:
         gap = sec - prev_sec
-        if gap > 6 and prev_kind != "breath" and kind != "breath":
+        # 呼吸段两侧豁免；反转之后的 6–12 秒是留白，观众正在消化新信息，也豁免
+        if gap > 6 and prev_kind not in ("breath", "twist") and kind != "breath":
             warns.append("L{} 前后空档 {}s（{:02d}:{:02d} → {:02d}:{:02d}），超过 6 秒未见对抗升级".format(
                 ln, gap, prev_sec // 60, prev_sec % 60, sec // 60, sec % 60))
         prev_sec, prev_kind = sec, kind

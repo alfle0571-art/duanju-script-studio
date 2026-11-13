@@ -5,8 +5,8 @@
 用法:
     python check_format.py <剧本文件路径> [更多路径...]
 
-检查项: 场序格式与连续性、每集场景数 <= 5、动作行、对话行、
-        内心os 写法、闪回成对、首次出场字幕覆盖、文风禁用词。
+检查项: 场序格式与连续性、每集场景数 <= 5、动作行、对话行、说话状态位置、
+        内心os 写法、闪回成对、首次出场字幕覆盖（群演可声明豁免）、文风禁用词。
 
 退出码: 0 = 无 ERROR（可交付）；1 = 存在 ERROR；2 = 入参或文件错误。
 仅做结构校验，不判断文笔；文笔与情绪按 SKILL.md 自检清单人工复核。
@@ -26,17 +26,19 @@ SCENE_HEAD = re.compile(r"^场(\d+)-(\d+)\s+(.*)$")
 DIALOG = re.compile(r"^([^△\s【】（）()：:]+?)(?:[（(][^）)]*[）)])?[：:]\s*(.*)$")
 OS_LINE = re.compile(r"^(.+?)内心\s*os\s*[：:]\s*(.*)$", re.IGNORECASE)
 CAPTION = re.compile(r"【字幕[：:]\s*([^，,、】]+)[，,]?([^】]*)】")
+# 群演 / 功能性角色豁免：文件里写一行「（本集群演：司仪、宾客甲、路人甲）」即可不挂字幕
+EXTRA = re.compile(r"[（(]?\s*(?:本集)?群演\s*[：:]\s*([^）)】\n]+)")
 FLASH_START = "【闪回】"
 FLASH_END = "【闪回结束】"
 
-# B 区博主腔 / C 区学术腔 / 互联网黑话（对应 SKILL.md 硬规则 3）
+# B 区博主腔 / C 区学术腔 / 互联网黑话（对应 SKILL.md 硬规则 4）
 BANNED = [
     "哈哈", "emmm", "说实话", "以我的经验", "个人觉得", "我之前试过",
     "欢迎在评论区", "有没有遇到过这种情况", "说到这个", "对了，还有",
     "星巴克", "赋能", "闭环", "全链路", "多维度", "底座", "体系化",
     "发挥了关键作用", "提供了坚实基础", "全方位强化", "综上所述", "由此可见",
 ]
-# 动作行里不该出现的抽象情绪判断（对应硬规则 4）
+# 动作行里不该出现的抽象情绪判断（对应硬规则 5）
 ABSTRACT = [
     "很悲伤", "很愤怒", "气氛压抑", "气氛凝固", "内心悲痛", "心情复杂",
     "情绪崩溃", "感到绝望", "十分震惊", "非常难过", "特别生气",
@@ -45,6 +47,8 @@ ABSTRACT = [
 VAGUE_CUE = re.compile(r"[（(](悲伤|愤怒|开心|难过|生气|震惊|害怕|激动|痛苦|绝望)[）)]")
 
 SKIP_PREFIX = ("△", "【", "（", "(", "#", ">", "|", "-", "---", "第", "*", ">")
+# 说话状态必须写在人物名后、冒号前；紧跟冒号的括号属于排版错误
+PAREN_OPEN = ("（", "(")
 # 这些是版面标签而非角色，不能算进「有台词角色」的字幕覆盖
 NON_SPEAKER = {"字幕", "人物", "主要人物", "时间", "地点", "备注", "场次", "集数", "片名", "标题", "类型"}
 
@@ -60,6 +64,7 @@ def check(path):
     scenes = []                 # (行号, 集号, 场号, 整行)
     speakers = set()            # 有台词的角色
     captions = set()            # 挂过字幕的角色
+    extras = set()              # 声明为群演、不需要字幕的角色
     flash_depth = 0
     scene_count_by_ep = {}
     has_action = False
@@ -70,9 +75,21 @@ def check(path):
         if not line:
             continue
 
+        # 文风禁用词：台词、动作行、OS、场序、字幕一律检查。
+        # 必须放在各条 continue 之前，否则动作行与 OS 会整体绕过（旧版漏洞）。
+        for word in BANNED:
+            if word in line:
+                issues.append(("ERROR", idx, "出现禁用词「{}」：博主腔 / 学术腔 / 黑话不得进入剧本（SKILL.md 硬规则 4）".format(word)))
+
         # 字幕：可在任意行尾，先全局收集
         for m in CAPTION.finditer(line):
             captions.add(m.group(1).strip())
+
+        # 群演豁免声明
+        for m in EXTRA.finditer(line):
+            for part in re.split(r"[、，,／/]", m.group(1)):
+                if part.strip():
+                    extras.add(part.strip())
 
         # 闪回配对
         if FLASH_START in line:
@@ -98,6 +115,12 @@ def check(path):
         # 疑似场序但写错前缀
         if re.match(r"^\d+-\d+\s", line):
             issues.append(("ERROR", idx, "场序缺少「场」前缀，应写作 场x-y …"))
+            continue
+
+        # 「场1-1日内灵堂」这类缺空格的场序，SCENE_HEAD 匹配不到，
+        # 旧版会被下面的「以场开头就跳过」静默吃掉，等于整场失检。
+        if re.match(r"^场\s*\d+\s*-\s*\d+\s*\S", line):
+            issues.append(("ERROR", idx, "场序格式错误：场号和「天气/场景」之间缺空格，应写作 场1-1 日/内 灵堂 主要人物：…"))
             continue
 
         # 动作行
@@ -137,11 +160,8 @@ def check(path):
                 vm = VAGUE_CUE.search(line)
                 if vm:
                     issues.append(("WARN", idx, "括号里只写了「{}」，换成具体动作或语气".format(vm.group(1))))
-
-        # 文风禁用词（台词、动作行、OS 一律检查）
-        for word in BANNED:
-            if word in line:
-                issues.append(("ERROR", idx, "出现禁用词「{}」：博主腔 / 学术腔 / 黑话不得进入剧本（SKILL.md 硬规则 3）".format(word)))
+                if speech.startswith(PAREN_OPEN):
+                    issues.append(("ERROR", idx, "「{}」的说话状态写在了冒号后，规范是 人物名（动作）：台词".format(name)))
 
     if flash_depth > 0:
         issues.append(("ERROR", len(lines), "有 {} 处【闪回】未用【闪回结束】闭合".format(flash_depth)))
@@ -170,15 +190,16 @@ def check(path):
     if not has_dialog:
         issues.append(("WARN", 0, "全篇没有识别到对话行"))
 
-    missing = sorted(speakers - captions)
+    missing = sorted(speakers - captions - extras)
     if missing:
-        issues.append(("ERROR", 0, "以下有台词的角色未挂【字幕】：{}".format("、".join(missing))))
+        issues.append(("ERROR", 0, "以下有台词的角色未挂【字幕】：{}（群演请先声明「（本集群演：…）」）".format("、".join(missing))))
 
     return {
         "scenes": len(scenes),
         "by_ep": scene_count_by_ep,
         "speakers": len(speakers),
         "captions": len(captions),
+        "extras": len(speakers & extras),
     }, issues
 
 
@@ -209,7 +230,8 @@ def main():
             detail = " / ".join("第{}集 {} 场".format(ep, n) for ep, n in sorted(stat["by_ep"].items()))
             print("  --- 汇总 ---")
             print("  场景：{}（共 {} 场）".format(detail or "无", stat["scenes"]))
-            print("  有台词角色 {} 个，字幕覆盖 {} 个".format(stat["speakers"], stat["captions"]))
+            print("  有台词角色 {} 个，字幕覆盖 {} 个，群演豁免 {} 个".format(
+                stat["speakers"], stat["captions"], stat["extras"]))
         print("  ERROR {} 项 / WARN {} 项 → {}".format(len(errs), len(warns), "未通过，需修复 ERROR" if errs else "通过，可交付"))
         total_err += len(errs)
         total_warn += len(warns)

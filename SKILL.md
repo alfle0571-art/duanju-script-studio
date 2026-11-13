@@ -2,7 +2,7 @@
 name: duanju-script-studio
 description: "【中文短剧 / 漫剧 · 文字剧本交付件】模糊说法：「写个70集大纲」「把粗纲扩成细纲」「按细纲写第3集」「△开头那种剧本」「场1-1怎么写」「内心OS」「闪回放哪」「这段台词太AI了」「3秒一冲突怎么排」「只给个主题帮我写剧本」。产出70-80集分集大纲、逐集细纲、标准格式分集剧本（△动作行、人物名加冒号、括号情绪、首次出场字幕、内心os、闪回、场x-x场序），按秒级节奏密度表（3秒冲突/5秒爆点/6秒巴掌位/8-11秒笑点/15秒包袱/30秒反转）排布；也可从一句话主题起做剧本雏形（故事背景、人物、对话戏），再续接70-80集生产线与AI漫剧四步分镜。自带情绪微表情库、爆款六规律、已装编剧技能协同地图、去AI味文风工具箱与格式/节奏双校验脚本。要画面加旁白的解说稿转写剧本；要15集竖屏短剧工业统筹转microdrama-storyforge；要漫剧全流程与视频提示词编译转manju-production-suite；要改已有本子转screenwriting-pro；只要逐镜成品表转seedance-shotlist-director。"
 description_en: "A production line for Chinese paid short dramas and AI comic dramas. Turns a one-line theme, a premise, or a novel excerpt into a script prototype, then a 70-80 episode outline, per-episode beats, and fully formatted shooting scripts (triangle action lines, colon dialogue, bracketed emotion cues, on-screen character captions, inner monologue, flashbacks, numbered scene headings), staged against a second-level rhythm grid (conflict every 3s, beat every 5s, slap-back slot every 6s, joke every 8-11s, payoff every 15s, twist every 30s). Also produces an AI-friendly storyboard with compliance-safe staging. Ships an emotion micro-expression library, hook rules, a writer-skill collaboration map, a de-AI voice toolkit and format plus rhythm checkers."
-version: 1.2.1
+version: 1.3.0
 agent_created: true
 ---
 
@@ -73,7 +73,7 @@ agent_created: true
 ## 六条硬规则
 
 1. **先定级再动笔。** 明确本次交付物是哪一级（主题雏形 / 大纲 / 细纲 / 剧本 / 分镜），一次只交付一级。用户要"一条龙"时按工位顺序逐级确认，禁止跳级把大纲直接扩成剧本。只有一句主题时先走工位 0 出雏形，这不属于跳级；但雏形没过出口判据，不得直接排 70 集。
-2. **排版是交付件，不是风格建议。** 分集剧本一律遵循 `04-format-spec.md`：每集场景不超过 5 个、`场x-y` 场序连续、动作行以 `△` 起始、对话用「人物名：」、说话状态写在括号内、人物首次或第二次出场给【字幕】、内心活动写「人物名内心os：」、闪回用 `【闪回】` / `【闪回结束】` 成对包裹。成稿后运行 `scripts/check_format.py` 校验。
+2. **排版是交付件，不是风格建议。** 分集剧本一律遵循 `04-format-spec.md`：每集场景不超过 5 个、`场x-y` 场序连续且场号后留空格、动作行以 `△` 起始、对话用「人物名：」、**说话状态写在人物名后冒号前**（`司念（坐起身）：……`，不是 `司念：（坐起身）……`）、主要人物在第一或第二个画面给【字幕】、群演用「（本集群演：…）」声明豁免、年代地点写「（时间字幕：…）」而不是人物字幕、内心活动写「人物名内心os：」、闪回用 `【闪回】` / `【闪回结束】` 成对包裹。成稿后运行 `scripts/check_format.py` 校验。
 3. **节奏按秒排，两轴并行。** 写细纲与剧本时遵守 `09-rhythm-grid.md`：3 秒冲突、5 秒爆点、6 秒巴掌位、8–11 秒笑点、15 秒包袱、30 秒集内反转。**张力轴与喜剧轴并行叠加，不是六条轮流**；「3 秒一冲突」是密度上限（对抗持续升级，观众任意时刻回看 3 秒都有事发生），不是每 3 秒换一个新矛盾；「6 秒一巴掌」是打脸爽点的**可替换位**，字面暴力须按 `05` 降维。每 25–35 秒给 5–8 秒呼吸段，反转之后必给。工位 2 必须出带时间码的时间轴并跑 `scripts/check_rhythm.py`；按题材选档位，虐恋 / 悬疑关闭喜剧轴。集内 30 秒反转与 `01` 的跨集主反转不是一个尺度，不混用。
 4. **文风隔离，最易翻车的一条。** `08-voice-toolkit.md` 的 **B 区（28 岁博主闲聊体）与 C 区（学术 / 论文 / 商务润色）禁止进入**剧本的台词、动作行、OS、字幕。短剧台词标准是：短句、当代口语、带情绪钩子、可直接念出来。禁止出现"哈哈""emmm""说实话""以我的经验""欢迎在评论区分享"、禁止排比与"赋能 / 闭环 / 全链路"式黑话、禁止书面长句与论文腔。只有用户明确要求改写文案、公众号稿或论文时，才启用 B / C 区。
 5. **情绪必须落到可见的脸上和身上。** 写动作行与表演提示时，从 `06-emotion-library.md` 取具体可见描述（牙关紧咬、咬肌紧绷、眼底泛红、鼻翼微缩、肩膀微颤），不写"她很悲伤""他愤怒了""气氛压抑"这类抽象判断。抽象词只可用于细纲的节奏标注，不可用于剧本正文。
@@ -109,7 +109,8 @@ agent_created: true
 - [ ] 时间轴两轴分别排过，通过 `scripts/check_rhythm.py`（按题材选对档位），超期锚点已修正
 - [ ] 每 25–35 秒有呼吸段，反转之后必有；全季标了节奏档位，有降档集与呼吸集
 - [ ] 集内 30 秒反转没有被误写成跨集主反转
-- [ ] 每个有台词的角色首次或第二次出场带【字幕】
+- [ ] 每个有台词的主要角色在第一或第二个画面带【字幕】，群演已用「（本集群演：…）」声明，年代地点写成（时间字幕：…）
+- [ ] 说话状态写在人物名后、冒号前，没有写成「人物名：（动作）台词」
 - [ ] 台词里没有博主腔、学术腔、排比句和互联网黑话
 - [ ] 动作行写的是看得见的动作与微表情，不是情绪形容词
 - [ ] 每集结尾留钩子；全季反转节点不集中在前 10 集
