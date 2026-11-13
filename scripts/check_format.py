@@ -83,11 +83,15 @@ def check(path):
 
         # 字幕：可在任意行尾，先全局收集
         for m in CAPTION.finditer(line):
-            captions.add(m.group(1).strip())
+            cap = m.group(1).strip()
+            captions.add(cap)
+            # 年代 / 地点被写成人物字幕，会被当成一个叫「1987 年」的角色（04 第 4 条）
+            if re.search(r"\d{2,4}\s*年|年代|世纪", cap):
+                issues.append(("WARN", idx, "【字幕：{}】是年代 / 时间信息，应写成（时间字幕：{}）".format(cap, cap)))
 
         # 群演豁免声明
         for m in EXTRA.finditer(line):
-            for part in re.split(r"[、，,／/]", m.group(1)):
+            for part in re.split(r"[、，,／/；;]", m.group(1)):
                 if part.strip():
                     extras.add(part.strip())
 

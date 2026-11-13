@@ -212,6 +212,7 @@ def main():
             break
 
     # 6. 字面暴力与占位符
+    placeholders = []
     for sec, k, text, ln in anchors:
         for pat in VIOLENCE:
             hit = re.search(pat, text)
@@ -220,7 +221,14 @@ def main():
                     ln, hit.group(0)))
                 break
         if "〈" in text or "填写" in text:
-            warns.append("L{} 落点还是占位符，未填具体内容".format(ln))
+            placeholders.append(ln)
+    # 空白模板会整篇都是占位符，逐行报会把真正的问题淹没，压成一条汇总
+    if len(placeholders) == 1:
+        warns.append("L{} 落点还是占位符，未填具体内容".format(placeholders[0]))
+    elif placeholders:
+        head = "、".join("L{}".format(x) for x in placeholders[:3])
+        warns.append("{} 等 {} 处落点还是占位符（{:.0%}），未填具体内容；照模板刚起稿时出现此提示属正常".format(
+            head, len(placeholders), len(placeholders) / len(anchors)))
 
     # 7. 包袱结构
     if "payoff" in kinds and "setup" not in kinds and args.mode in ("full", "comedy"):
