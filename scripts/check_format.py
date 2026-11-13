@@ -45,6 +45,8 @@ ABSTRACT = [
 VAGUE_CUE = re.compile(r"[（(](悲伤|愤怒|开心|难过|生气|震惊|害怕|激动|痛苦|绝望)[）)]")
 
 SKIP_PREFIX = ("△", "【", "（", "(", "#", ">", "|", "-", "---", "第", "*", ">")
+# 这些是版面标签而非角色，不能算进「有台词角色」的字幕覆盖
+NON_SPEAKER = {"字幕", "人物", "主要人物", "时间", "地点", "备注", "场次", "集数", "片名", "标题", "类型"}
 
 
 def check(path):
@@ -125,7 +127,7 @@ def check(path):
         m = DIALOG.match(line)
         if m:
             name, speech = m.group(1).strip(), m.group(2).strip()
-            if name and len(name) <= 12 and not name.startswith("填写"):
+            if name and name not in NON_SPEAKER and len(name) <= 12 and not name.startswith("填写"):
                 has_dialog = True
                 speakers.add(name)
                 if not speech:

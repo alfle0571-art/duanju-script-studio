@@ -2,7 +2,7 @@
 name: duanju-script-studio
 description: "【中文短剧 / 漫剧 · 文字剧本交付件】模糊说法：「写个70集大纲」「把粗纲扩成细纲」「按细纲写第3集」「△开头那种剧本」「场1-1怎么写」「内心OS」「闪回放哪」「这段台词太AI了」「3秒一冲突怎么排」「只给个主题帮我写剧本」。产出70-80集分集大纲、逐集细纲、标准格式分集剧本（△动作行、人物名加冒号、括号情绪、首次出场字幕、内心os、闪回、场x-x场序），按秒级节奏密度表（3秒冲突/5秒爆点/6秒巴掌位/8-11秒笑点/15秒包袱/30秒反转）排布；也可从一句话主题起做剧本雏形（故事背景、人物、对话戏），再续接70-80集生产线与AI漫剧四步分镜。自带情绪微表情库、爆款六规律、已装编剧技能协同地图、去AI味文风工具箱与格式/节奏双校验脚本。要画面加旁白的解说稿转写剧本；要15集竖屏短剧工业统筹转microdrama-storyforge；要漫剧全流程与视频提示词编译转manju-production-suite；要改已有本子转screenwriting-pro；只要逐镜成品表转seedance-shotlist-director。"
 description_en: "A production line for Chinese paid short dramas and AI comic dramas. Turns a one-line theme, a premise, or a novel excerpt into a script prototype, then a 70-80 episode outline, per-episode beats, and fully formatted shooting scripts (triangle action lines, colon dialogue, bracketed emotion cues, on-screen character captions, inner monologue, flashbacks, numbered scene headings), staged against a second-level rhythm grid (conflict every 3s, beat every 5s, slap-back slot every 6s, joke every 8-11s, payoff every 15s, twist every 30s). Also produces an AI-friendly storyboard with compliance-safe staging. Ships an emotion micro-expression library, hook rules, a writer-skill collaboration map, a de-AI voice toolkit and format plus rhythm checkers."
-version: 1.2.0
+version: 1.2.1
 agent_created: true
 ---
 

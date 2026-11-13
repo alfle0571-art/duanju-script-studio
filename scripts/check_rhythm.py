@@ -9,7 +9,7 @@
     00:06 | 巴掌 | 女主一句话把婆婆噎在原地
 
 检查: 锚点齐全度、任意空档长度、呼吸段、类型单调、字面暴力、未填占位符。
-退出码: 0 = 可交付（可带 WARN）；1 = 存在 ERROR（缺必需锚点或无法解析）。
+退出码: 0 = 可交付（可带 WARN）；1 = 存在 ERROR（缺必需锚点、反转后缺呼吸段或无法解析）。
 
 这是辅助检查，不替代 `09-rhythm-grid.md` 里的创作判断。
 """
@@ -76,7 +76,12 @@ MODE_NOTE = {
     "light": "降档：周期放宽 1.5 倍",
 }
 
-VIOLENCE = ["扇耳光", "掌掴", "打了一巴掌", "一记耳光", "抽了一巴掌"]
+# 用正则而非子串：「扇婆婆耳光」「抽了她一巴掌」这类插入成分，纯子串匹配会漏检
+VIOLENCE = [
+    r"扇.{0,4}耳光", r"扇.{0,4}巴掌", r"抽.{0,3}巴掌", r"打.{0,3}巴掌",
+    r"一记耳光", r"掌掴", r"断肢", r"割喉", r"流血", r"血迹",
+    r"捅进", r"刺穿", r"血肉模糊",
+]
 
 
 def parse(path):
@@ -148,9 +153,11 @@ def main():
             if longest > limit:
                 warns.append("「{}」相邻间隔最长 {}s 超过 {}s，补一个该类型锚点".format(
                     LABELS[k], longest, int(limit)))
-        if pts[0] > PERIOD[k] * cfg["factor"]:
-            warns.append("「{}」首次出现太晚（{:02d}:{:02d}），开场密度不足".format(
-                LABELS[k], pts[0] // 60, pts[0] % 60))
+        # 首现上限与间隔上限用同一把尺，否则会出现「间隔 33s 合格、首现 12s 就报错」的自相矛盾
+        first_limit = cfg.get("extra", {}).get(k, PERIOD[k] * cfg["factor"])
+        if pts[0] > first_limit:
+            warns.append("「{}」首次出现太晚（{:02d}:{:02d}，上限 {}s），开场密度不足".format(
+                LABELS[k], pts[0] // 60, pts[0] % 60, int(first_limit)))
 
     # 3. 全局空档（呼吸段豁免）
     print("\n  --- 全局密度 ---")
@@ -172,8 +179,12 @@ def main():
         warns.append("全篇没有呼吸段，每 25–35 秒应给 5–8 秒低密度段，反转之后必给")
     twists = [s for s, k, _, _ in anchors if k == "twist"]
     for t in twists:
+        # 反转本身就是结尾钩子时，身后没有时长可排，豁免
+        if duration - t < 12:
+            continue
         if not any(t < b <= t + 12 for b, _, _ in breaths):
-            warns.append("{:02d}:{:02d} 的反转之后 12 秒内没有呼吸段，新信息来不及落地".format(t // 60, t % 60))
+            errs.append("{:02d}:{:02d} 的反转之后 12 秒内没有呼吸段，新信息来不及落地（09 定为硬要求）".format(
+                t // 60, t % 60))
 
     # 5. 类型单调
     run, run_kind = 0, None
@@ -188,9 +199,11 @@ def main():
 
     # 6. 字面暴力与占位符
     for sec, k, text, ln in anchors:
-        for w in VIOLENCE:
-            if w in text:
-                warns.append("L{} 出现字面暴力「{}」，按 05-storyboard-pipeline.md 降维为侧面暗示 + 精准音效".format(ln, w))
+        for pat in VIOLENCE:
+            hit = re.search(pat, text)
+            if hit:
+                warns.append("L{} 出现字面暴力「{}」，按 05-storyboard-pipeline.md 降维为侧面暗示 + 精准音效".format(
+                    ln, hit.group(0)))
                 break
         if "〈" in text or "填写" in text:
             warns.append("L{} 落点还是占位符，未填具体内容".format(ln))
@@ -206,8 +219,8 @@ def main():
         print("  WARN   " + w)
     if not errs and not warns:
         print("  未发现问题。")
-    print("\n  ERROR {} 项 / WARN {} 项 → {}".format(
-        len(errs), len(warns), "未通过，补齐必需锚点" if errs else "可交付，按 WARN 人工判断"))
+    print("\n  汇总：ERROR {} 项 / WARN {} 项 → {}".format(
+        len(errs), len(warns), "未通过，按 ERROR 修复" if errs else "可交付，按 WARN 人工判断"))
     return 1 if errs else 0
 
 
